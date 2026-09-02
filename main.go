@@ -41,6 +41,7 @@ const (
 	defaultAITimeout        = 30 * time.Second
 	defaultHost             = "hh.ru"
 	defaultGithubURL        = "https://github.com/s3rgeym"
+	defaultMaxApplications  = 100
 	defaultRequestInterval  = 1200 * time.Millisecond
 	defaultWorkers          = 2
 	secCHUAHeader           = `"Chromium";v="151", "Google Chrome";v="151", "Not-A.Brand";v="99"`
@@ -60,6 +61,8 @@ var (
 	logger                  *Logger
 	latesteResumeHashRegexp = regexp.MustCompile(`"latestResumeHash":"([a-f0-9]{30,})"`)
 	userIdRegexp            = regexp.MustCompile(`"userId":(\d+)`)
+	vacancyResponseIDRegexp = regexp.MustCompile(`(?s)data-qa="vacancy-serp__vacancy_response"[^>]*href="[^"]*vacancyId=(\d+)[^"]*"`)
+	htmlTagRegexp           = regexp.MustCompile(`(?s)<[^>]*>`)
 )
 
 type Config struct {
@@ -68,6 +71,7 @@ type Config struct {
 	LogLevel                string
 	Resume                  string
 	MaxResponses            int
+	MaxApplications         int
 	AIBaseURL               string
 	AIModel                 string
 	AIAPIKey                string
@@ -1321,6 +1325,7 @@ type HHAIResponder struct {
 	searchParams            url.Values
 	cookiesPath             string
 	maxResponses            int
+	maxApplications         int
 	client                  *http.Client
 	jar                     *MemoryPersistentJar
 	requester               *HHRequester
@@ -1566,6 +1571,7 @@ func NewHHAIResponder(ctx context.Context, cfg Config) (*HHAIResponder, error) {
 		baseURL:                 baseURL,
 		cookiesPath:             cfg.CookiesPath,
 		maxResponses:            cfg.MaxResponses,
+		maxApplications:         cfg.MaxApplications,
 		client:                  client,
 		jar:                     jar,
 		resumeHash:              cfg.Resume,
@@ -2435,12 +2441,75 @@ func (r *HHAIResponder) fetchVacancyPage(page int) ([]Vacancy, error) {
 		return nil, unexpectedHTTPStatus(resp.Status)
 	}
 
+	searchBody := resp.Body
+	// Current HH pages place the embedded JSON in an HTML template, escaping
+	// quotes as &#34;. Decode it before looking for the legacy JSON payload.
+	if bytes.Contains(searchBody, []byte("&#34;")) {
+		searchBody = []byte(html.UnescapeString(string(searchBody)))
+	}
+
 	var vacancies []Vacancy
-	if err := decodeEmbeddedJSON(resp.Body, `,"vacancies":`, &vacancies); err != nil {
-		return nil, err
+	if err := decodeEmbeddedJSON(searchBody, `,"vacancies":`, &vacancies); err == nil {
+		return vacancies, nil
+	}
+
+	// Fallback for a possible future page version without embedded vacancy JSON.
+	vacancies, err = parseVacanciesFromSearchHTML(resp.Body)
+	if err == nil {
+		return vacancies, nil
+	}
+
+	return nil, err
+}
+
+// parseVacanciesFromSearchHTML extracts vacancies from the current HH search page.
+// HH no longer embeds the former `,"vacancies":` JSON payload in the page, but keeps
+// a stable data-qa marker on each available response button.
+func parseVacanciesFromSearchHTML(body []byte) ([]Vacancy, error) {
+	text := string(body)
+	responseMatches := vacancyResponseIDRegexp.FindAllStringSubmatch(text, -1)
+	if len(responseMatches) == 0 {
+		return nil, errors.New("vacancy response buttons not found in search page")
+	}
+
+	vacancies := make([]Vacancy, 0, len(responseMatches))
+	seen := make(map[int]struct{}, len(responseMatches))
+	for _, match := range responseMatches {
+		id, err := strconv.Atoi(match[1])
+		if err != nil {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+
+		// The title link is a full URL and is tied to the same vacancy ID.
+		titleRegexp := regexp.MustCompile(`(?s)<a[^>]*data-qa="serp-item__title"[^>]*href="([^"]*/vacancy/` + strconv.Itoa(id) + `(?:\?[^"]*)?)"[^>]*>(.*?)</a>`)
+		titleMatch := titleRegexp.FindStringSubmatch(text)
+		if len(titleMatch) != 3 {
+			logger.Debug("Skip vacancy %d: title link not found", id)
+			continue
+		}
+
+		vacancies = append(vacancies, Vacancy{
+			ID:   id,
+			Name: cleanHTMLText(titleMatch[2]),
+			Links: map[string]string{
+				"desktop": html.UnescapeString(titleMatch[1]),
+			},
+		})
+		seen[id] = struct{}{}
+	}
+
+	if len(vacancies) == 0 {
+		return nil, errors.New("vacancy response buttons found but no vacancy titles parsed")
 	}
 
 	return vacancies, nil
+}
+
+func cleanHTMLText(value string) string {
+	return strings.Join(strings.Fields(html.UnescapeString(htmlTagRegexp.ReplaceAllString(value, " "))), " ")
 }
 
 func (r *HHAIResponder) ApplyVacancies() error {
@@ -2449,6 +2518,7 @@ func (r *HHAIResponder) ApplyVacancies() error {
 		return errors.New("resume not found")
 	}
 
+	applicationsAttempted := 0
 	for page := 0; ; page++ {
 		if r.ctx.Err() != nil {
 			return r.ctx.Err()
@@ -2512,6 +2582,12 @@ func (r *HHAIResponder) ApplyVacancies() error {
 				}
 				logger.Debug("Coverage letter:\n\n%s", letter)
 			}
+
+			if applicationsAttempted >= r.maxApplications {
+				logger.Info("Application limit reached (%d per run)", r.maxApplications)
+				return nil
+			}
+			applicationsAttempted++
 
 			var responseResult map[string]any
 			var solutions []QAPair
@@ -2892,6 +2968,7 @@ func parseConfig() (Config, error) {
 	flag.StringVar(&cfg.Resume, "r", "", "ID резюме (если не указан — используется последнее)")
 	flag.StringVar(&cfg.OutputPath, "o", "", "Файл для вывода результатов (по умолчанию — в STDOUT)")
 	flag.IntVar(&cfg.MaxResponses, "mr", 0, "Пропускать вакансии с количеством откликов больше N")
+	flag.IntVar(&cfg.MaxApplications, "max-applications", defaultMaxApplications, "Максимум попыток отклика за один 12-часовой проход")
 	flag.BoolVar(&cfg.ListResumes, "R", false, "Показать список резюме и выйти")
 	flag.BoolVar(&cfg.ForceLetter, "force-letter", false, "Всегда генерировать сопроводительное письмо")
 	flag.DurationVar(&cfg.AITimeout, "ai-timeout", defaultAITimeout, "Общий таймаут AI-запроса: соединение и чтение ответа")
@@ -2920,6 +2997,15 @@ func parseConfig() (Config, error) {
 	if !flags["r"] {
 		cfg.Resume = getEnv("HH_RESUME", cfg.Resume)
 	}
+	if !flags["max-applications"] {
+		if value := os.Getenv("HH_MAX_APPLICATIONS"); value != "" {
+			maxApplications, err := strconv.Atoi(value)
+			if err != nil {
+				return Config{}, fmt.Errorf("invalid HH_MAX_APPLICATIONS: %w", err)
+			}
+			cfg.MaxApplications = maxApplications
+		}
+	}
 	if !flags["ai-base-url"] {
 		cfg.AIBaseURL = getEnv("HH_AI_BASE_URL", cfg.AIBaseURL)
 	}
@@ -2944,6 +3030,9 @@ func parseConfig() (Config, error) {
 
 	if cfg.AIAttempts < 1 {
 		return Config{}, errors.New("ai-attempts must be greater than 0")
+	}
+	if cfg.MaxApplications < 1 {
+		return Config{}, errors.New("max-applications must be greater than 0")
 	}
 	if cfg.AITimeout <= 0 {
 		return Config{}, errors.New("ai-timeout must be greater than 0")
