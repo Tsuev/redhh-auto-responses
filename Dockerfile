@@ -12,10 +12,10 @@ WORKDIR /app
 
 COPY main.go go.mod .
 
-RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w" -o /usr/local/bin/hh-ai-responder .
+RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w" -o /usr/local/bin/redhh-ai-responder .
 
-RUN chmod +x /usr/local/bin/hh-ai-responder
+RUN chmod +x /usr/local/bin/redhh-ai-responder
 
 USER appuser
 
-ENTRYPOINT ["hh-ai-responder"]
+ENTRYPOINT ["redhh-ai-responder"]

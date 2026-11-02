@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-APP="hh-ai-responder"
+APP="redhh-ai-responder"
 
 # Переходим в директорию, где находится скрипт
 cd "$(dirname "$0")" || {

@@ -2992,40 +2992,40 @@ func parseConfig() (Config, error) {
 	})
 
 	if !flags["u"] {
-		cfg.SearchURL = getEnv("HH_SEARCH_URL", cfg.SearchURL)
+		cfg.SearchURL = getEnv("REDHH_SEARCH_URL", cfg.SearchURL)
 	}
 	if !flags["r"] {
-		cfg.Resume = getEnv("HH_RESUME", cfg.Resume)
+		cfg.Resume = getEnv("REDHH_RESUME", cfg.Resume)
 	}
 	if !flags["max-applications"] {
-		if value := os.Getenv("HH_MAX_APPLICATIONS"); value != "" {
+		if value := os.Getenv("REDHH_MAX_APPLICATIONS"); value != "" {
 			maxApplications, err := strconv.Atoi(value)
 			if err != nil {
-				return Config{}, fmt.Errorf("invalid HH_MAX_APPLICATIONS: %w", err)
+				return Config{}, fmt.Errorf("invalid REDHH_MAX_APPLICATIONS: %w", err)
 			}
 			cfg.MaxApplications = maxApplications
 		}
 	}
 	if !flags["ai-base-url"] {
-		cfg.AIBaseURL = getEnv("HH_AI_BASE_URL", cfg.AIBaseURL)
+		cfg.AIBaseURL = getEnv("REDHH_AI_BASE_URL", cfg.AIBaseURL)
 	}
 	if !flags["ai-model"] {
-		cfg.AIModel = getEnv("HH_AI_MODEL", cfg.AIModel)
+		cfg.AIModel = getEnv("REDHH_AI_MODEL", cfg.AIModel)
 	}
 	if !flags["ai-api-key"] {
-		cfg.AIAPIKey = getEnv("HH_AI_API_KEY", cfg.AIAPIKey)
+		cfg.AIAPIKey = getEnv("REDHH_AI_API_KEY", cfg.AIAPIKey)
 	}
 	if !flags["letter-prompt"] {
-		cfg.ExtraLetterPrompt = getEnv("HH_LETTER_PROMPT", cfg.ExtraLetterPrompt)
+		cfg.ExtraLetterPrompt = getEnv("REDHH_LETTER_PROMPT", cfg.ExtraLetterPrompt)
 	}
 	if !flags["solution-prompt"] {
-		cfg.ExtraTestSolutionPrompt = getEnv("HH_SOLUTION_PROMPT", cfg.ExtraTestSolutionPrompt)
+		cfg.ExtraTestSolutionPrompt = getEnv("REDHH_SOLUTION_PROMPT", cfg.ExtraTestSolutionPrompt)
 	}
 	if !flags["chat-reply-prompt"] {
-		cfg.ExtraChatReplyPrompt = getEnv("HH_CHAT_REPLY_PROMPT", cfg.ExtraChatReplyPrompt)
+		cfg.ExtraChatReplyPrompt = getEnv("REDHH_CHAT_REPLY_PROMPT", cfg.ExtraChatReplyPrompt)
 	}
 	if !flags["contacts"] {
-		cfg.Contacts = getEnv("HH_CONTACTS", cfg.Contacts)
+		cfg.Contacts = getEnv("REDHH_CONTACTS", cfg.Contacts)
 	}
 
 	if cfg.AIAttempts < 1 {

@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$App = "hh-ai-responder.exe"
+$App = "redhh-ai-responder.exe"
 
 try {
     # Переходим в директорию, где находится скрипт

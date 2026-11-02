@@ -1,7 +1,7 @@
 services:
-  hh-ai-responder:
+  redhh-ai-responder:
     build: .
-    container_name: hh-ai-responder
+    container_name: redhh-ai-responder
     restart: unless-stopped
     env_file: .env
     volumes:
